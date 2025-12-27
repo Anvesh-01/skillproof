@@ -1,8 +1,28 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
-const nextConfig: NextConfig = {
-  /* config options here */
-  reactCompiler: true,
+const config: NextConfig = {
+  reactStrictMode: true,
+  
+  // Image configuration
+  images: {
+    domains: ['example.com'],
+  },
+  
+  // Environment variables
+  env: {
+    CUSTOM_KEY: process.env.CUSTOM_KEY,
+  },
+  
+  // Redirects
+  async redirects() {
+    return [
+      {
+        source: '/old-route',
+        destination: '/new-route',
+        permanent: true,
+      },
+    ];
+  },
 };
 
-export default nextConfig;
+export default config;
