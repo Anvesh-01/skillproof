@@ -4,9 +4,9 @@ import ActivityLog from "@/models/ActivityLog";
 import type { ILogResponse } from "@/types/log";
 
 interface RouteParams {
-  params: {
+  params: Promise<{
     userId: string;
-  };
+  }>;
 }
 
 export async function GET(
@@ -14,7 +14,8 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse<ILogResponse>> {
   try {
-    const { userId } = params;
+    // FIXED: Await params
+    const { userId } = await params;
 
     if (!userId) {
       return NextResponse.json(
@@ -29,9 +30,14 @@ export async function GET(
       .sort({ timestamp: -1 })
       .limit(100);
 
+    const plainLogs = logs.map(log => ({
+      ...log.toObject(),
+      _id: log._id.toString(),
+    }));
+
     return NextResponse.json({
       success: true,
-      data: logs,
+      data: plainLogs,
     });
   } catch (error) {
     console.error("Error fetching logs:", error);

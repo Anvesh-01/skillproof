@@ -194,7 +194,7 @@ export default function UploadCertificate() {
               </div>
 
               {file && (
-                <div className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-700 bg-blue-50 py-2 px-4 rounded-lg inline-flex">
+                <div className="mt-4 inline-flex items-center justify-center gap-2 text-sm text-gray-700 bg-blue-50 py-2 px-4 rounded-lg">
                   <FileText className="w-4 h-4 text-blue-600" />
                   <span className="font-medium">{file.name}</span>
                 </div>

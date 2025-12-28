@@ -21,6 +21,8 @@ export interface IExam {
   questionsAnswered: IQuestionAnswered[];
   result?: 'pass' | 'fail' | 'under-review';
   completedAt?: Date;
+  cheatingPenalty?: number;
+  finalGrade?: string;
 }
 
 export interface IExamResponse {

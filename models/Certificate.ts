@@ -42,7 +42,7 @@ const CertificateSchema = new Schema({
 
 CertificateSchema.index({ clerkUserId: 1, uploadedAt: -1 });
 
-const Certificate: Model = 
-  models.Certificate || mongoose.model("Certificate", CertificateSchema);
+const Certificate: Model<ICertificateDocument> = 
+  models.Certificate || mongoose.model<ICertificateDocument>("Certificate", CertificateSchema);
 
 export default Certificate;

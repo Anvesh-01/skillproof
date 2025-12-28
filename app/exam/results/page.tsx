@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CheckCircle, XCircle, Award, TrendingUp, Clock, Home } from "lucide-react";
+import { CheckCircle, XCircle, Award, TrendingUp, Clock, Home, Download, AlertTriangle, QrCode } from "lucide-react";
+import Image from "next/image";
 
 interface Exam {
   _id: string;
@@ -12,6 +13,13 @@ interface Exam {
   correctAnswers: number;
   timeSpent: number;
   result: string;
+  proctoringViolations: Array<{
+    type: string;
+    timestamp: string;
+    severity: string;
+  }>;
+  finalGrade?: string;
+  cheatingPenalty?: number;
   questionsAnswered: Array<{
     questionText: string;
     userAnswer: string;
@@ -27,6 +35,9 @@ export default function ExamResults() {
 
   const [exam, setExam] = useState<Exam | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [qrCode, setQrCode] = useState("");
+  const [generatingQR, setGeneratingQR] = useState(false);
+  const [showQR, setShowQR] = useState(false);
 
   useEffect(() => {
     if (examId) {
@@ -36,23 +47,59 @@ export default function ExamResults() {
 
   const fetchExamResults = async () => {
     try {
-      const response = await fetch(`/api/exams/user/${examId}`);
+      console.log('Fetching exam results for examId:', examId);
+      const response = await fetch(`/api/exams/${examId}`);
       const data = await response.json();
       
+      console.log('Exam results response:', data);
+      
       if (data.success && data.data) {
-        // If data.data is an array, find the specific exam
-        if (Array.isArray(data.data)) {
-          const foundExam = data.data.find((e: any) => e._id === examId);
-          setExam(foundExam || null);
-        } else {
-          setExam(data.data);
-        }
+        setExam(data.data);
+      } else {
+        console.error('Failed to fetch exam:', data.message);
       }
     } catch (error) {
       console.error("Error fetching exam results:", error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const generateQRCode = async () => {
+    if (!examId) return;
+
+    setGeneratingQR(true);
+    try {
+      const response = await fetch("/api/proctoring/exam/generate-qr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ examId }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setQrCode(data.data.qrCode);
+        setShowQR(true);
+      } else {
+        console.error("QR generation failed:", data.message);
+        alert(`Failed to generate QR code: ${data.message || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error("Error generating QR code:", error);
+      alert("Failed to generate QR code. Please try again.");
+    } finally {
+      setGeneratingQR(false);
+    }
+  };
+
+  const downloadQRCode = () => {
+    if (!qrCode) return;
+
+    const link = document.createElement('a');
+    link.href = qrCode;
+    link.download = `exam-certificate-${examId}.png`;
+    link.click();
   };
 
   if (isLoading) {
@@ -66,14 +113,20 @@ export default function ExamResults() {
     );
   }
 
-  if (!exam) {
+  if (!examId) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600 mb-4">Exam not found.</p>
+        <div className="text-center max-w-md mx-auto p-8 bg-white rounded-xl shadow-lg">
+          <div className="text-red-600 mb-4">
+            <AlertTriangle className="w-16 h-16 mx-auto" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Missing Exam ID</h2>
+          <p className="text-gray-600 mb-4">
+            No exam ID was provided. Please submit your exam properly.
+          </p>
           <button
             onClick={() => router.push("/dashboard")}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
           >
             Back to Dashboard
           </button>
@@ -82,9 +135,40 @@ export default function ExamResults() {
     );
   }
 
-  const isPassed = exam.result === 'pass';
+  if (!exam) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-8 bg-white rounded-xl shadow-lg">
+          <div className="text-yellow-600 mb-4">
+            <AlertTriangle className="w-16 h-16 mx-auto" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Exam Not Found</h2>
+          <p className="text-gray-600 mb-4">
+            The exam results could not be found. This may happen if the exam was not submitted properly.
+          </p>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isPassed = exam.result === 'pass' || (exam.finalGrade && exam.finalGrade === 'PASS');
   const timeSpentMinutes = Math.floor(exam.timeSpent / 60);
   const timeSpentSeconds = exam.timeSpent % 60;
+  const adjustedScore = exam.cheatingPenalty 
+    ? Math.max(0, exam.score - exam.cheatingPenalty) 
+    : exam.score;
+
+  const violationSummary = {
+    high: exam.proctoringViolations?.filter(v => v.severity === 'high').length || 0,
+    medium: exam.proctoringViolations?.filter(v => v.severity === 'medium').length || 0,
+    low: exam.proctoringViolations?.filter(v => v.severity === 'low').length || 0,
+  };
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-8">
@@ -123,38 +207,38 @@ export default function ExamResults() {
           </div>
         </div>
 
-        {/* Score Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        {/* Score Overview with Proctoring */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                 <TrendingUp className="w-5 h-5 text-blue-600" />
               </div>
-              <p className="text-sm font-medium text-gray-600">Your Score</p>
+              <p className="text-sm font-medium text-gray-600">Original Score</p>
             </div>
             <p className="text-3xl font-bold text-blue-600">{exam.score}%</p>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                <CheckCircle className="w-5 h-5 text-green-600" />
+          {exam.cheatingPenalty && exam.cheatingPenalty > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-red-200 p-6">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <p className="text-sm font-medium text-gray-600">Penalty</p>
               </div>
-              <p className="text-sm font-medium text-gray-600">Correct</p>
+              <p className="text-3xl font-bold text-red-600">-{exam.cheatingPenalty.toFixed(1)}%</p>
             </div>
-            <p className="text-3xl font-bold text-green-600">{exam.correctAnswers}</p>
-          </div>
+          )}
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                <XCircle className="w-5 h-5 text-red-600" />
+              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                <Award className="w-5 h-5 text-green-600" />
               </div>
-              <p className="text-sm font-medium text-gray-600">Incorrect</p>
+              <p className="text-sm font-medium text-gray-600">Final Score</p>
             </div>
-            <p className="text-3xl font-bold text-red-600">
-              {exam.totalQuestions - exam.correctAnswers}
-            </p>
+            <p className="text-3xl font-bold text-green-600">{adjustedScore.toFixed(1)}%</p>
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -170,45 +254,121 @@ export default function ExamResults() {
           </div>
         </div>
 
-        {/* Performance Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Performance Breakdown</h2>
-          <div className="space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="font-medium text-gray-700">Correct Answers</span>
-                <span className="font-semibold text-green-600">
-                  {((exam.correctAnswers / exam.totalQuestions) * 100).toFixed(1)}%
-                </span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div 
-                  className="bg-green-600 h-3 rounded-full transition-all duration-500"
-                  style={{ width: `${(exam.correctAnswers / exam.totalQuestions) * 100}%` }}
-                ></div>
-              </div>
+        {/* Proctoring Violations */}
+        {exam.proctoringViolations && exam.proctoringViolations.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <h2 className="text-xl font-bold text-gray-900">Proctoring Report</h2>
             </div>
 
-            <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="font-medium text-gray-700">Incorrect Answers</span>
-                <span className="font-semibold text-red-600">
-                  {(((exam.totalQuestions - exam.correctAnswers) / exam.totalQuestions) * 100).toFixed(1)}%
-                </span>
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                <p className="text-2xl font-bold text-red-600">{violationSummary.high}</p>
+                <p className="text-sm text-red-800">High Severity</p>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div 
-                  className="bg-red-600 h-3 rounded-full transition-all duration-500"
-                  style={{ width: `${((exam.totalQuestions - exam.correctAnswers) / exam.totalQuestions) * 100}%` }}
-                ></div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
+                <p className="text-2xl font-bold text-yellow-600">{violationSummary.medium}</p>
+                <p className="text-sm text-yellow-800">Medium Severity</p>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                <p className="text-2xl font-bold text-blue-600">{violationSummary.low}</p>
+                <p className="text-sm text-blue-800">Low Severity</p>
               </div>
             </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {exam.proctoringViolations.map((v, i) => (
+                <div key={i} className={`p-3 rounded-lg border-l-4 ${
+                  v.severity === 'high' ? 'bg-red-50 border-red-500' :
+                  v.severity === 'medium' ? 'bg-yellow-50 border-yellow-500' :
+                  'bg-blue-50 border-blue-500'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-gray-900">
+                      {v.type.replace(/_/g, ' ').toUpperCase()}
+                    </span>
+                    <span className="text-xs text-gray-600">
+                      {new Date(v.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <span className={`text-xs font-medium ${
+                    v.severity === 'high' ? 'text-red-700' :
+                    v.severity === 'medium' ? 'text-yellow-700' :
+                    'text-blue-700'
+                  }`}>
+                    {v.severity.toUpperCase()} SEVERITY
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
+        )}
+
+        {/* QR Code Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <QrCode className="w-5 h-5 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">Verification Certificate</h2>
+            </div>
+            
+            {!showQR ? (
+              <button
+                onClick={generateQRCode}
+                disabled={generatingQR}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold disabled:opacity-50"
+              >
+                {generatingQR ? 'Generating...' : 'Generate QR Code'}
+              </button>
+            ) : (
+              <button
+                onClick={downloadQRCode}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold"
+              >
+                <Download className="w-4 h-4" />
+                Download QR
+              </button>
+            )}
+          </div>
+
+          {showQR && qrCode && (
+            <div className="flex flex-col items-center">
+              <div className="bg-white p-4 rounded-lg border-2 border-gray-200 mb-4">
+                <Image 
+                  src={qrCode} 
+                  alt="Exam Verification QR Code" 
+                  width={300} 
+                  height={300}
+                  className="rounded-lg"
+                />
+              </div>
+              <p className="text-sm text-gray-600 text-center max-w-md">
+                Scan this QR code to view complete exam details including all questions, answers, 
+                proctoring violations, and final grade. This serves as your verified skill certificate.
+              </p>
+              <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 max-w-md">
+                <p className="text-xs text-blue-800">
+                  <strong>QR Code Contains:</strong> All questions asked, your answers, correct answers, 
+                  time taken, proctoring violations, penalty applied, and final grade
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!showQR && (
+            <div className="text-center py-8 text-gray-500">
+              <QrCode className="w-16 h-16 mx-auto mb-3 text-gray-400" />
+              <p>Generate a QR code to create your verified digital certificate</p>
+              <p className="text-sm mt-2">
+                The QR code will contain complete exam details and serve as proof of your skills
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Question Review */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Question Review</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-6">Detailed Question Review</h2>
           <div className="space-y-4">
             {exam.questionsAnswered.map((qa, index) => (
               <div 

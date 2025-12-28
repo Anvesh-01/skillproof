@@ -6,9 +6,9 @@ import { promises as fs } from "fs";
 import type { ICertificateResponse } from "@/types/certificate";
 
 interface RouteParams {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export async function GET(
@@ -16,7 +16,8 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse<ICertificateResponse>> {
   try {
-    const { id } = params;
+    // FIXED: Await params
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json(
@@ -35,9 +36,14 @@ export async function GET(
       );
     }
 
+    const plainCertificate = {
+      ...certificate.toObject(),
+      _id: certificate._id.toString(),
+    };
+
     return NextResponse.json({
       success: true,
-      data: certificate,
+      data: plainCertificate,
     });
   } catch (error) {
     console.error("Error fetching certificate:", error);
@@ -56,7 +62,8 @@ export async function DELETE(
   { params }: RouteParams
 ): Promise<NextResponse<ICertificateResponse>> {
   try {
-    const { id } = params;
+    // FIXED: Await params
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json(
@@ -75,17 +82,14 @@ export async function DELETE(
       );
     }
 
-    // Delete file
     try {
       await fs.unlink(certificate.filePath);
     } catch (fileError) {
       console.error("Error deleting file:", fileError);
     }
 
-    // Delete from database
     await Certificate.findByIdAndDelete(id);
 
-    // Log activity
     await ActivityLog.create({
       userId: certificate.clerkUserId,
       action: 'certificate_delete',

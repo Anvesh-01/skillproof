@@ -8,16 +8,16 @@ if (!MONGODB_URI) {
 
 interface MongooseCache {
   conn: typeof mongoose | null;
-  promise: Promise | null;
+  promise: Promise<typeof mongoose> | null;
 }
 
-let cached: MongooseCache = global.mongoose || { conn: null, promise: null };
+let cached: MongooseCache = (global.mongoose as MongooseCache) || { conn: null, promise: null };
 
 if (!global.mongoose) {
-  global.mongoose = cached;
+  global.mongoose = cached as any;
 }
 
-async function connectDB(): Promise {
+async function connectDB(): Promise<typeof mongoose> {
   if (cached.conn) {
     return cached.conn;
   }

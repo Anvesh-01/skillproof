@@ -4,9 +4,9 @@ import Exam from "@/models/Exam";
 import type { IExamResponse } from "@/types/exam";
 
 interface RouteParams {
-  params: Promise<{
-    userId: string;
-  }>;
+  params: {
+    examId: string;
+  };
 }
 
 export async function GET(
@@ -14,35 +14,39 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse<IExamResponse>> {
   try {
-    // FIXED: Await params
-    const { userId } = await params;
+    const { examId } = params;
 
-    if (!userId) {
+    if (!examId) {
       return NextResponse.json(
-        { success: false, message: "User ID is required" },
+        { success: false, message: "Exam ID is required" },
         { status: 400 }
       );
     }
 
     await connectDB();
 
-    const exams = await Exam.find({ userId }).sort({ examDate: -1 });
+    const exam = await Exam.findById(examId);
 
-    const plainExams = exams.map(exam => ({
-      ...exam.toObject(),
-      _id: exam._id.toString(),
-    }));
+    if (!exam) {
+      return NextResponse.json(
+        { success: false, message: "Exam not found" },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      data: plainExams,
+      data: {
+        ...exam.toObject(),
+        _id: exam._id.toString(),
+      },
     });
   } catch (error) {
-    console.error("Error fetching exams:", error);
+    console.error("Error fetching exam:", error);
     return NextResponse.json(
       { 
         success: false, 
-        message: error instanceof Error ? error.message : "Failed to fetch exams" 
+        message: error instanceof Error ? error.message : "Failed to fetch exam" 
       },
       { status: 500 }
     );

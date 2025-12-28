@@ -1,17 +1,12 @@
-// ============================================
-// API: Get User Certificates
-// File: app/api/certificates/user/[userId]/route.ts
-// ============================================
-
 import { NextRequest, NextResponse } from "next/server";
 import connectDB from "@/lib/mongoose";
 import Certificate from "@/models/Certificate";
 import type { ICertificateResponse } from "@/types/certificate";
 
 interface RouteParams {
-  params: {
+  params: Promise<{
     userId: string;
-  };
+  }>;
 }
 
 export async function GET(
@@ -19,7 +14,8 @@ export async function GET(
   { params }: RouteParams
 ): Promise<NextResponse<ICertificateResponse>> {
   try {
-    const { userId } = params;
+    // FIXED: Await params in Next.js 15
+    const { userId } = await params;
 
     if (!userId) {
       return NextResponse.json(
@@ -34,9 +30,14 @@ export async function GET(
       clerkUserId: userId,
     }).sort({ uploadedAt: -1 });
 
+    const plainCertificates = certificates.map(cert => ({
+      ...cert.toObject(),
+      _id: cert._id.toString(),
+    }));
+
     return NextResponse.json({
       success: true,
-      data: certificates,
+      data: plainCertificates,
     });
   } catch (error) {
     console.error("Error fetching certificates:", error);

@@ -48,7 +48,10 @@ export async function POST(req: NextRequest): Promise<NextResponse<IExamResponse
 
     return NextResponse.json({
       success: true,
-      data: exam,
+      data: {
+        ...exam.toObject(),
+        _id: exam._id.toString(),
+      },
     });
   } catch (error) {
     console.error("Error starting exam:", error);

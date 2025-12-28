@@ -22,28 +22,28 @@ export async function POST(req: NextRequest): Promise<NextResponse<IUploadRespon
     // Validation
     if (!file) {
       return NextResponse.json(
-        { success: false, error: "No file uploaded" },
+        { success: false, message: "No file uploaded", error: "No file uploaded" },
         { status: 400 }
       );
     }
 
     if (!clerkUserId) {
       return NextResponse.json(
-        { success: false, error: "User ID is required" },
+        { success: false, message: "User ID is required", error: "User ID is required" },
         { status: 400 }
       );
     }
 
     if (file.type !== "application/pdf") {
       return NextResponse.json(
-        { success: false, error: "Only PDF files are allowed" },
+        { success: false, message: "Only PDF files are allowed", error: "Only PDF files are allowed" },
         { status: 400 }
       );
     }
 
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { success: false, error: "File size exceeds 10MB limit" },
+        { success: false, message: "File size exceeds 10MB limit", error: "File size exceeds 10MB limit" },
         { status: 400 }
       );
     }
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<IUploadRespon
     } catch (error) {
       await fs.unlink(uploadPath);
       return NextResponse.json(
-        { success: false, error: "Failed to parse PDF file" },
+        { success: false, message: "Failed to parse PDF file", error: "Failed to parse PDF file" },
         { status: 400 }
       );
     }
@@ -84,9 +84,26 @@ export async function POST(req: NextRequest): Promise<NextResponse<IUploadRespon
     let questions: IQuestion[] = [];
     try {
       questions = await generateQuestions(courseName);
+      if (!questions || questions.length === 0) {
+        console.warn("No questions generated, using fallback questions");
+        questions = getFallbackQuestions(courseName);
+      }
     } catch (error) {
       console.error("Error generating questions:", error);
-      questions = [];
+      questions = getFallbackQuestions(courseName);
+    }
+
+    // Ensure we have at least some questions
+    if (questions.length === 0) {
+      await fs.unlink(uploadPath);
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: "Failed to generate exam questions. Please try again or contact support.",
+          error: "Question generation failed" 
+        },
+        { status: 500 }
+      );
     }
 
     // Save to database
@@ -122,6 +139,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<IUploadRespon
     return NextResponse.json(
       {
         success: false,
+        message: "Failed to process certificate",
         error: "Failed to process certificate",
         details: error instanceof Error ? error.message : "Unknown error",
       },
@@ -154,7 +172,17 @@ function extractCourseName(text: string, fileName: string): string {
 }
 
 async function generateQuestions(courseName: string): Promise<IQuestion[]> {
-  const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  try {
+    // Check if API key exists
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("❌ GEMINI_API_KEY is not set in environment variables");
+      throw new Error("Gemini API key not configured");
+    }
+
+    console.log("🔑 Gemini API Key exists:", !!process.env.GEMINI_API_KEY);
+    console.log("📝 Generating questions for:", courseName);
+
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const prompt = `
 You are an expert exam generator. Based on the course "${courseName}", 
@@ -179,50 +207,205 @@ Provide ONLY a valid JSON array:
 No markdown, no code blocks, only JSON.
 `;
 
-  const result = await model.generateContent(prompt);
-  const responseText = result.response.text();
+    console.log("🚀 Sending request to Gemini...");
+    
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const responseText = response.text();
 
-  try {
-    const cleanedText = responseText
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim();
+    console.log("📥 Raw Gemini Response:");
+    console.log("─────────────────────────────────────────");
+    console.log(responseText.substring(0, 500)); // First 500 chars
+    console.log("─────────────────────────────────────────");
 
-    const questions: IQuestion[] = JSON.parse(cleanedText);
+    // Try multiple cleaning strategies
+    let cleanedText = responseText.trim();
 
-    if (!Array.isArray(questions) || questions.length === 0) {
-      throw new Error("Invalid questions format");
+    // Strategy 1: Remove markdown code blocks
+    cleanedText = cleanedText.replace(/```json\s*/gi, '');
+    cleanedText = cleanedText.replace(/```\s*/g, '');
+
+    // Strategy 2: Remove any text before the first [
+    const startIndex = cleanedText.indexOf('[');
+    const endIndex = cleanedText.lastIndexOf(']');
+    
+    if (startIndex === -1 || endIndex === -1) {
+      console.error("❌ No JSON array found in response");
+      throw new Error("Invalid response format - no JSON array");
     }
 
-    const validQuestions = questions.filter((q) => {
-      return (
+    cleanedText = cleanedText.substring(startIndex, endIndex + 1);
+
+    console.log("🧹 Cleaned text:");
+    console.log(cleanedText.substring(0, 300));
+
+    // Parse JSON
+    let questions: IQuestion[];
+    try {
+      questions = JSON.parse(cleanedText);
+    } catch (parseError) {
+      console.error("❌ JSON Parse Error:", parseError);
+      console.error("Failed text:", cleanedText.substring(0, 500));
+      throw new Error("Failed to parse JSON response");
+    }
+
+    console.log("✅ Parsed questions count:", questions.length);
+
+    // Validate questions
+    if (!Array.isArray(questions)) {
+      console.error("❌ Response is not an array");
+      throw new Error("Response is not an array");
+    }
+
+    if (questions.length === 0) {
+      console.error("❌ No questions in array");
+      throw new Error("Empty questions array");
+    }
+
+    // Validate each question
+    const validQuestions = questions.filter((q, index) => {
+      const isValid = (
         q.question &&
+        typeof q.question === 'string' &&
         Array.isArray(q.options) &&
         q.options.length === 4 &&
         q.answer &&
         ['A', 'B', 'C', 'D'].includes(q.answer)
       );
+
+      if (!isValid) {
+        console.warn(`⚠️ Invalid question at index ${index}:`, q);
+      }
+
+      return isValid;
     });
 
-    if (validQuestions.length === 0) {
-      throw new Error("No valid questions generated");
+    console.log("✅ Valid questions count:", validQuestions.length);
+
+    if (validQuestions.length < 5) {
+      console.error("❌ Too few valid questions:", validQuestions.length);
+      throw new Error(`Only ${validQuestions.length} valid questions generated`);
     }
 
+    console.log("🎉 Successfully generated", validQuestions.length, "questions");
     return validQuestions;
-  } catch (parseError) {
-    console.error("Error parsing Gemini response:", parseError);
-    return [
-      {
-        question: `What is the primary focus of ${courseName}?`,
-        options: [
-          "A) Fundamental concepts",
-          "B) Advanced techniques",
-          "C) Practical applications",
-          "D) All of the above",
-        ],
-        answer: "D",
-      },
-    ];
+
+  } catch (error) {
+    console.error("❌ Error in generateQuestions:", error);
+    
+    if (error instanceof Error) {
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+    }
+
+    // Re-throw to use fallback
+    throw error;
   }
 }
 
+function getFallbackQuestions(courseName: string): IQuestion[] {
+  console.log("⚠️ Using fallback questions for:", courseName);
+  
+  return [
+    {
+      question: `What is the primary objective of ${courseName}?`,
+      options: [
+        "A) Understanding fundamental concepts and principles",
+        "B) Memorizing facts and figures",
+        "C) Only theoretical knowledge",
+        "D) None of the above",
+      ],
+      answer: "A",
+    },
+    {
+      question: `Which of the following best describes the practical application of ${courseName}?`,
+      options: [
+        "A) Limited to academic settings",
+        "B) Real-world problem solving and implementation",
+        "C) Only research purposes",
+        "D) Not applicable in practice",
+      ],
+      answer: "B",
+    },
+    {
+      question: `What skill level is typically required to master ${courseName}?`,
+      options: [
+        "A) Beginner with basic understanding",
+        "B) Intermediate with practical experience",
+        "C) Advanced with deep expertise",
+        "D) It depends on the specific area of focus",
+      ],
+      answer: "D",
+    },
+    {
+      question: `Which approach is most effective when learning ${courseName}?`,
+      options: [
+        "A) Theory only",
+        "B) Practice only",
+        "C) Combination of theory and hands-on practice",
+        "D) Passive observation",
+      ],
+      answer: "C",
+    },
+    {
+      question: `What is a key benefit of certification in ${courseName}?`,
+      options: [
+        "A) Validation of skills and knowledge",
+        "B) Guaranteed job placement",
+        "C) No practical value",
+        "D) Only for resume enhancement",
+      ],
+      answer: "A",
+    },
+    {
+      question: `In ${courseName}, continuous learning is important because:`,
+      options: [
+        "A) The field evolves with new techniques and tools",
+        "B) It's required by law",
+        "C) There's nothing new to learn",
+        "D) It's not important at all",
+      ],
+      answer: "A",
+    },
+    {
+      question: `Which resource is most valuable for staying updated in ${courseName}?`,
+      options: [
+        "A) Outdated textbooks",
+        "B) Current industry publications and online communities",
+        "C) Social media gossip",
+        "D) Random blog posts",
+      ],
+      answer: "B",
+    },
+    {
+      question: `What distinguishes an expert in ${courseName} from a beginner?`,
+      options: [
+        "A) Years of experience only",
+        "B) Depth of understanding and ability to solve complex problems",
+        "C) Number of certificates",
+        "D) Social media following",
+      ],
+      answer: "B",
+    },
+    {
+      question: `Best practices in ${courseName} typically involve:`,
+      options: [
+        "A) Following outdated methods",
+        "B) Ignoring industry standards",
+        "C) Adhering to proven methodologies and continuous improvement",
+        "D) Working in isolation",
+      ],
+      answer: "C",
+    },
+    {
+      question: `The future of ${courseName} likely includes:`,
+      options: [
+        "A) No changes or evolution",
+        "B) Integration with emerging technologies and methodologies",
+        "C) Complete obsolescence",
+        "D) Remaining exactly the same",
+      ],
+      answer: "B",
+    },
+  ];
+}

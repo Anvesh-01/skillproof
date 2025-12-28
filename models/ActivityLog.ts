@@ -6,7 +6,7 @@ export interface IActivityLogDocument extends Document {
   action: string;
   description: string;
   timestamp: Date;
-  metadata?: Record;
+  metadata?: Record<string, any>;
 }
 
 const ActivityLogSchema = new Schema({
@@ -20,7 +20,7 @@ const ActivityLogSchema = new Schema({
 
 ActivityLogSchema.index({ userId: 1, timestamp: -1 });
 
-const ActivityLog: Model = 
-  models.ActivityLog || mongoose.model("ActivityLog", ActivityLogSchema);
+const ActivityLog: Model<IActivityLogDocument> = 
+  models.ActivityLog || mongoose.model<IActivityLogDocument>("ActivityLog", ActivityLogSchema);
 
 export default ActivityLog;

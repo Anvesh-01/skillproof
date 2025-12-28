@@ -1,9 +1,8 @@
 import mongoose, { Schema, Document, models, Model } from "mongoose";
-
 export interface IQuestionAnswered {
   questionId: string;
   questionText: string;
-  userAnswer: string;
+  userAnswer: string;  // Changed: No longer required in schema
   correctAnswer: string;
   isCorrect: boolean;
   timeSpent: number;
@@ -22,18 +21,20 @@ export interface IExamDocument extends Document {
   questionsAnswered: IQuestionAnswered[];
   result?: 'pass' | 'fail' | 'under-review';
   completedAt?: Date;
+  cheatingPenalty?: number;
+  finalGrade?: string;
 }
 
-const QuestionAnsweredSchema = new Schema({
+const QuestionAnsweredSchema = new Schema<IQuestionAnswered>({
   questionId: { type: String, required: true },
   questionText: { type: String, required: true },
-  userAnswer: { type: String, required: true },
+  userAnswer: { type: String, required: false, default: 'No answer' }, // FIXED: Made optional
   correctAnswer: { type: String, required: true },
   isCorrect: { type: Boolean, required: true },
   timeSpent: { type: Number, default: 0 }
 }, { _id: false });
 
-const ExamSchema = new Schema({
+const ExamSchema = new Schema<IExamDocument>({
   userId: { type: String, required: true, index: true },
   certificateId: { type: String, required: true },
   certificateName: { type: String },
@@ -53,11 +54,13 @@ const ExamSchema = new Schema({
     enum: ['pass', 'fail', 'under-review']
   },
   completedAt: { type: Date },
+  cheatingPenalty: { type: Number, default: 0 },
+  finalGrade: { type: String },
 }, { timestamps: true });
 
 ExamSchema.index({ userId: 1, examDate: -1 });
 
-const Exam: Model = 
-  models.Exam || mongoose.model("Exam", ExamSchema);
+const Exam: Model<IExamDocument> = 
+  models.Exam || mongoose.model<IExamDocument>("Exam", ExamSchema);
 
 export default Exam;

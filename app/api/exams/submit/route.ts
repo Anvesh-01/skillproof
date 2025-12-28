@@ -28,19 +28,29 @@ export async function POST(req: NextRequest): Promise<NextResponse<IExamResponse
       );
     }
 
+    // FIXED: Ensure all answers have userAnswer field (even if empty)
+    const processedAnswers = questionsAnswered.map((q: any) => ({
+      questionId: q.questionId || '',
+      questionText: q.questionText || '',
+      userAnswer: q.userAnswer || 'No answer',  // Default value if empty
+      correctAnswer: q.correctAnswer || '',
+      isCorrect: q.isCorrect || false,
+      timeSpent: q.timeSpent || 0,
+    }));
+
     // Calculate score
-    const correctAnswers = questionsAnswered.filter((q: any) => q.isCorrect).length;
-    const totalQuestions = questionsAnswered.length;
+    const correctAnswers = processedAnswers.filter((q: any) => q.isCorrect).length;
+    const totalQuestions = processedAnswers.length;
     const score = Math.round((correctAnswers / totalQuestions) * 100);
     const result = score >= 70 ? 'pass' : 'fail';
 
     // Update exam
     exam.status = 'completed';
-    exam.questionsAnswered = questionsAnswered;
+    exam.questionsAnswered = processedAnswers;
     exam.totalQuestions = totalQuestions;
     exam.correctAnswers = correctAnswers;
     exam.score = score;
-    exam.timeSpent = timeSpent;
+    exam.timeSpent = timeSpent || 0;
     exam.result = result;
     exam.completedAt = new Date();
 
@@ -63,9 +73,14 @@ export async function POST(req: NextRequest): Promise<NextResponse<IExamResponse
       timestamp: new Date(),
     });
 
+    const plainExam = {
+      ...exam.toObject(),
+      _id: exam._id.toString(),
+    };
+
     return NextResponse.json({
       success: true,
-      data: exam,
+      data: plainExam,
     });
   } catch (error) {
     console.error("Error submitting exam:", error);
