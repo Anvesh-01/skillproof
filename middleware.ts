@@ -12,8 +12,15 @@ const isAuthRoute = createRouteMatcher([
   '/sign-up(.*)',
 ]);
 
+const isLandingPage = createRouteMatcher(['/']);
+
 export default clerkMiddleware(async (auth, request) => {
   const { userId } = await auth();
+
+  // Redirect authenticated users from landing page to dashboard
+  if (userId && isLandingPage(request)) {
+    return NextResponse.redirect(new URL('/dashboard', request.url));
+  }
 
   // Redirect authenticated users away from auth pages to dashboard
   if (userId && isAuthRoute(request)) {
